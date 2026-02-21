@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fraud Shield | Intelligence Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .fraud-alert { border-left: 5px solid #ef4444 !important; }
+        .clean-pass { border-left: 5px solid #22c55e !important; }
+        #feed::-webkit-scrollbar { width: 4px; }
+        #feed::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .details-content { display: none; }
+        .logic-tag { font-size: 8px; padding: 1px 4px; border-radius: 3px; text-transform: uppercase; font-weight: bold; }
+    </style>
+</head>
+<body class="bg-[#0f172a] text-white p-6 overflow-hidden">
+    <div class="max-w-4xl mx-auto h-screen flex flex-col">
+        <header class="flex justify-between items-center mb-6 border-b border-slate-700 pb-4">
+            <div>
+                <h1 class="text-xl font-mono font-bold tracking-widest text-blue-400">>> FRAUD_SHIELD.INTELLIGENCE</h1>
+                <p class="text-[9px] text-slate-500 uppercase tracking-widest">Hybrid Detection Protocol v2.0</p>
+            </div>
+            <div id="status" class="text-[10px] font-bold px-3 py-1 rounded bg-green-600">ONLINE</div>
+        </header>
+
+        <div class="flex-grow bg-[#1e293b] rounded-lg border border-slate-700 flex flex-col overflow-hidden shadow-2xl">
+            <div class="p-3 bg-slate-800 text-[10px] flex justify-between font-mono text-slate-400 border-b border-slate-700">
+                <span>ANALYST VIEW: CLICK CARD FOR FULL LOGIC BREAKDOWN</span>
+                <span id="counter">SESSIONS PROCESSED: 0</span>
+            </div>
+            <div id="feed" class="flex-grow overflow-y-auto p-4 space-y-3 font-mono">
+                </div>
+        </div>
+
+        <footer class="mt-4 grid grid-cols-3 gap-4 text-[9px] text-slate-500 uppercase font-mono">
+            <div class="border-l border-blue-500 pl-2">
+                <span class="text-blue-400 block">Supervised (XGBoost)</span>
+                Matches known fraud "signatures" from past data.
+            </div>
+            <div class="border-l border-yellow-500 pl-2">
+                <span class="text-yellow-400 block">Unsupervised (IsoForest)</span>
+                Detects "weird" outliers that don't fit normal clusters.
+            </div>
+            <div class="border-l border-red-500 pl-2">
+                <span class="text-red-400 block">Emergency Layer</span>
+                Safety block for unrecognized or impossible data.
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        const feed = document.getElementById('feed');
+        const counter = document.getElementById('counter');
+        let count = 0;
+
+        function getDetailedExplanation(data) {
+            const isFraud = data.analysis.is_fraud;
+            const model = data.analysis.model_used;
+            const amt = data.tx.Transaction_Amount;
+
+            if (!isFraud) {
+                return `<strong>NORMALIZED BEHAVIOR:</strong> The transaction of $${amt} matches common spending clusters for this user ID. Neither model detected significant deviation from baseline.`;
+            }
+
+            if (model === 'supervised') {
+                return `
+                    <strong>PATTERN MATCH DETECTED (Supervised Learning):</strong><br/>
+                    The XGBoost model flagged this because it mirrors <u>known historical fraud signatures</u>. 
+                    Specifically, the correlation between this amount, the merchant category, and the location matches high-risk profiles in our training set.
+                `;
+            } else if (model === 'unsupervised') {
+                return `
+                    <strong>STATISTICAL ANOMALY (Unsupervised Learning):</strong><br/>
+                    The Isolation Forest model flagged this as an <u>outlier</u>. 
+                    It doesn't necessarily look like a "known" scam, but it is mathematically isolated from 99% of normal transaction clusters in our current data space.
+                `;
+            } else {
+                return `
+                    <strong>PROTOCOL VIOLATION (Emergency Filter):</strong><br/>
+                    The system rejected this because the data point is <u>out-of-bounds</u>. 
+                    Location '${data.tx.Location}' is not recognized in the registry. To prevent a Zero-Day breach, the system defaults to a BLOCK for safety.
+                `;
+            }
+        }
+
+        function connect() {
+            const ws = new WebSocket("ws://127.0.0.1:8000/ws");
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                count++;
+                counter.innerText = `SESSIONS PROCESSED: ${count}`;
+
+                const card = document.createElement('div');
+                const isFraud = data.analysis.is_fraud;
+                
+                card.className = `p-4 rounded bg-slate-800/80 border border-slate-700 cursor-pointer transition-all hover:bg-slate-700/50 ${isFraud ? 'fraud-alert' : 'clean-pass'}`;
+                
+                card.onclick = function() {
+                    const details = this.querySelector('.details-content');
+                    details.style.display = details.style.display === "block" ? "none" : "block";
+                };
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <div class="text-xs">
+                            <span class="${isFraud ? 'text-red-400' : 'text-green-400'} font-bold">
+                                ${isFraud ? '[!!! RISK_ALERT !!!]' : '[✓ VERIFIED_PASS]'}
+                            </span>
+                            <span class="ml-2 text-slate-300">REF: ${data.tx.Transaction_ID}</span>
+                        </div>
+                        <div class="text-blue-300 font-bold">$${data.tx.Transaction_Amount.toFixed(2)}</div>
+                    </div>
+                    
+                    <div class="text-[9px] text-slate-500 mt-1 flex justify-between items-center">
+                        <div class="flex gap-2">
+                            <span>METHOD: <span class="text-slate-300">${data.analysis.model_used}</span></span>
+                            <span class="logic-tag ${isFraud ? 'bg-red-900/40 text-red-400' : 'bg-green-900/40 text-green-400'}">
+                                ${isFraud ? 'Block' : 'Allow'}
+                            </span>
+                        </div>
+                        <span class="italic text-[8px]">Details ▼</span>
+                    </div>
+
+                    <div class="details-content mt-4 pt-4 border-t border-slate-700">
+                        <div class="bg-slate-900/50 p-3 rounded mb-4">
+                            <div class="text-blue-400 text-[10px] font-bold mb-1 uppercase tracking-widest">Analyst Reason:</div>
+                            <p class="text-slate-300 text-[11px] leading-relaxed italic">${getDetailedExplanation(data)}</p>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-y-3 text-[9px] text-slate-500 uppercase">
+                            <div><span class="text-slate-400 block text-[8px]">Customer ID</span> ${data.tx.User_ID}</div>
+                            <div><span class="text-slate-400 block text-[8px]">Sector</span> ${data.tx.Merchant_Category}</div>
+                            <div><span class="text-slate-400 block text-[8px]">Geotag</span> ${data.tx.Location}</div>
+                            <div><span class="text-slate-400 block text-[8px]">Detection Logic</span> ${data.analysis.strategy || 'Hybrid-Mesh'}</div>
+                        </div>
+                    </div>
+                `;
+                
+                feed.prepend(card);
+                if(feed.children.length > 30) feed.lastChild.remove();
+            };
+
+            ws.onclose = () => setTimeout(connect, 2000);
+        }
+
+        connect();
+    </script>
+</body>
+</html>
